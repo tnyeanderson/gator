@@ -1,0 +1,14 @@
+{
+  "type": "gator",
+  "plugin": "debug",
+  "config": {
+    "addHooks": [
+      [
+        "sh",
+        "-c",
+        "ip link set $CNI_IFNAME promisc on"
+      ]
+    ]
+  },
+  "patch": "{\"cniOutput\": \"{{printf \"/tmp/cni-output-%s.log\" (now | date \"2006-01-02\")}}\"}"
+}

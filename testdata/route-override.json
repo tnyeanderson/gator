@@ -1,0 +1,41 @@
+{
+  "type": "gator",
+  "plugin": "route-override",
+  "patch": "{\"addroutes\": [{\"dst\": \"10.96.0.0/16\", \"gw\": \"{{with $n := index .prevResult.ips 0}}{{$n.gateway}}{{end}}\"}]}",
+  "prevResult": {
+    "cniVersion": "0.3.1",
+    "interfaces": [
+      {
+        "name": "cni0",
+        "mac": "00:00:00:00:00:01"
+      },
+      {
+        "name": "veth99999999",
+        "mac": "00:00:00:00:00:02"
+      },
+      {
+        "name": "eth0",
+        "mac": "00:00:00:00:00:03",
+        "sandbox": "/var/run/netns/cni-00000000-1111-2222-3333-444444444444"
+      }
+    ],
+    "ips": [
+      {
+        "version": "4",
+        "interface": 2,
+        "address": "10.244.1.42/24",
+        "gateway": "10.244.1.1"
+      }
+    ],
+    "routes": [
+      {
+        "dst": "10.244.0.0/16"
+      },
+      {
+        "dst": "0.0.0.0/0",
+        "gw": "10.244.1.1"
+      }
+    ],
+    "dns": {}
+  }
+}
