@@ -7,9 +7,9 @@ result from previous plugins in the chain.
 It takes the name of the downstream plugin, configuration for the downstream
 plugin, and a JSON merge patch to be applied to that configuration.
 
-The patch can include golang text/template syntax which will be executed based
-on the full input from stdin before the patch is applied to the downstream
-configuration.
+The patch can include golang [template](https://pkg.go.dev/text/template)
+syntax which will be executed based on the full input from stdin before the
+patch is applied to the downstream configuration.
 
 Once the patch has been applied to the downstream configuration, it will be
 merged with stdin (gator's plugin configuration will be removed) and the the
