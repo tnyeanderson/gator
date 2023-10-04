@@ -1,5 +1,8 @@
 # gator
 
+>IMPORTANT: gator is currently unstable and is not ready for production
+release.
+
 `gator` is a templating delegator (get it?) CNI meta plugin. It allows a CNI
 plugin's configuration to be dynamically generated at runtime based on the
 result from previous plugins in the chain.
@@ -30,7 +33,7 @@ result, and you must set the gateway for the route in the plugin's
 configuration. With `gator`, you can template the configuration you want to
 calculate at runtime.
 
-Say you want to end up with this config at runtime, which adds a route for the
+You want to end up with this config at runtime, which adds a route for the
 service subnet `10.96.0.0/16` through the gateway defined in the first IP
 listed in the PrevResult from flannel:
 
@@ -94,8 +97,8 @@ Put it all together and you get the following `gator` configuration:
 }
 ```
 
-One more example. Let's say that you want to set every container interface to
-promiscuous mode with the debug plugin (this is from the [debug
+One more example: You want to set every container interface to promiscuous mode
+with the debug plugin (this is from the [debug
 repo](https://github.com/containernetworking/cni/tree/main/plugins/debug)), but
 you also want to save the debug logs to separate files based on the date.
 Here's the `gator` config:
