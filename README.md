@@ -116,9 +116,7 @@ Here's the `gator` config:
 The `patch` looks like this without all the JSON escapes:
 
 ```json
-{
-  "cniOutput": "{{printf "/tmp/cni-output-%s.log" (now | date "2006-01-02")}}"
-}
+{"cniOutput": "{{printf "/tmp/cni-output-%s.log" (now | date "2006-01-02")}}"}
 ```
 
 At runtime, the `debug` plugin will be called with the following configuration
