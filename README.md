@@ -48,7 +48,7 @@ listed in the PrevResult from flannel:
 
 You're getting something like this from stdin:
 
-```
+```json
 {
   ...
   "prevResult": {
