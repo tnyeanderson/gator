@@ -115,7 +115,7 @@ Here's the `gator` config:
 
 The `patch` looks like this without all the JSON escapes:
 
-```json
+```
 {"cniOutput": "{{printf "/tmp/cni-output-%s.log" (now | date "2006-01-02")}}"}
 ```
 
