@@ -31,7 +31,13 @@ import (
 	"strings"
 
 	sprig "github.com/Masterminds/sprig/v3"
+	"github.com/containernetworking/cni/pkg/types"
 	jsonpatch "github.com/evanphx/json-patch"
+)
+
+const (
+	ErrInvalidPatchTemplate = 100
+	ErrMergeJSONFailed      = 101
 )
 
 type PluginConfig struct {
@@ -47,71 +53,136 @@ type PluginConfig struct {
 
 	// Plugin is the name of the downstream CNI plugin which will be called.
 	Plugin string
+
+	// finalConfig is the config that will be provided to stdin when the
+	// delegated plugin is called.
+	finalConfig []byte
 }
 
 func main() {
 	stdin, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		log.Fatalf("error: failed to read stdin: %s", err.Error())
+		err := types.NewError(
+			types.ErrIOFailure,
+			"failed to read stdin",
+			err.Error(),
+		)
+		handleError(err)
+		return
 	}
 
+	conf, err := prepare(stdin)
+	if err != nil {
+		handleError(err)
+	}
+
+	// For debugging:
+	//fmt.Println(string(conf.finalConfig))
+
+	if err := delegate(conf.Plugin, conf.finalConfig, os.Environ()); err != nil {
+		handleError(err)
+	}
+}
+
+func prepare(stdin []byte) (*PluginConfig, error) {
 	conf := &PluginConfig{}
 	if err := json.Unmarshal(stdin, conf); err != nil {
-		log.Fatalf("error: failed to parse JSON config: %s", err.Error())
+		return nil, types.NewError(
+			types.ErrDecodingFailure,
+			"failed to parse JSON config",
+			err.Error(),
+		)
 	}
 
 	tmpl, err := template.New("conf.Patch").Funcs(sprig.FuncMap()).Parse(conf.Patch)
 	if err != nil {
-		log.Fatalf("error: failed to parse JSON merge patch template: %s", err.Error())
+		return nil, types.NewError(
+			types.ErrDecodingFailure,
+			"failed to parse JSON merge patch template",
+			err.Error(),
+		)
 	}
 
 	type data interface{}
 	var rawConf data
 	err = json.Unmarshal(stdin, &rawConf)
 	if err != nil {
-		log.Fatalf("error: failed to parse JSON to plain interface: %s", err.Error())
+		return nil, types.NewError(
+			types.ErrDecodingFailure,
+			"failed to parse stdin to plain interface",
+			err.Error(),
+		)
 	}
 
 	merger := &bytes.Buffer{}
 	if err = tmpl.Execute(merger, rawConf); err != nil {
-		log.Fatalf("error: failed to execute template for JSON merge patch: %s", err.Error())
+		return nil, types.NewError(
+			ErrInvalidPatchTemplate,
+			"failed to execute template for JSON merge patch",
+			err.Error(),
+		)
 	}
 
 	cleanup := fmt.Sprintf(`{"type": "%s", "plugin": null, "config": null, "patch": null}`, conf.Plugin)
 	cleaned, err := jsonpatch.MergePatch(stdin, []byte(cleanup))
 	if err != nil {
-		log.Fatalf("error: failed to clean up undelegated config items: %s", err.Error())
+		return nil, types.NewError(
+			ErrMergeJSONFailed,
+			"failed to clean up undelegated config items",
+			err.Error(),
+		)
 	}
 
+	// Allow no-op configs
 	downstreamConf := []byte("{}")
 	if conf.Config != nil {
 		downstreamConf = *conf.Config
 	}
-	downstream, err := jsonpatch.MergePatch(downstreamConf, merger.Bytes())
-	if err != nil {
-		log.Fatalf("error: failed to merge patch with downstream config: %s", err.Error())
+	patch := merger.Bytes()
+	if len(patch) == 0 {
+		patch = []byte("{}")
 	}
 
-	finalConf, err := jsonpatch.MergePatch(cleaned, downstream)
+	downstream, err := jsonpatch.MergePatch(downstreamConf, patch)
 	if err != nil {
-		log.Fatalf("error: failed to merge downstream config with original: %s", err.Error())
+		return nil, types.NewError(
+			ErrMergeJSONFailed,
+			"failed to merge patch with downstream config",
+			err.Error(),
+		)
 	}
 
-	// For debugging:
-	//fmt.Println(string(finalConf))
-
-	pluginPath, err := getPluginPath(conf.Plugin)
+	finalConfig, err := jsonpatch.MergePatch(cleaned, downstream)
 	if err != nil {
-		log.Fatal(err.Error())
+		return nil, types.NewError(
+			ErrMergeJSONFailed,
+			"failed to merge downstream config with original",
+			err.Error(),
+		)
+	}
+
+	conf.finalConfig = finalConfig
+	return conf, nil
+}
+
+func handleError(err error) {
+	log.Println(err)
+}
+
+func delegate(plugin string, stdin []byte, env []string) error {
+	pluginPath, err := getPluginPath(plugin)
+	if err != nil {
+		return err
 	}
 	cmd := exec.Command(pluginPath)
-	cmd.Env = os.Environ()
+	cmd.Env = env
 	cmd.Stderr = os.Stderr
-	cmd.Stdin = bytes.NewReader(finalConf)
+	cmd.Stdin = bytes.NewReader(stdin)
 	cmd.Stdout = os.Stdout
 	if err := cmd.Run(); err != nil {
-		log.Fatal(err.Error())
+		return err
 	}
+	return nil
 }
 
 func getPluginPath(plugin string) (string, error) {

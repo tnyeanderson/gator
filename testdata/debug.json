@@ -10,5 +10,5 @@
       ]
     ]
   },
-  "patch": "{\"cniOutput\": \"{{printf \"/tmp/cni-output-%s.log\" (now | date \"2006-01-02\")}}\"}"
+  "patch": "{\"cniOutput\": \"{{printf \"/tmp/cni-output-%s.log\" (now | date \"2006\")}}\"}"
 }

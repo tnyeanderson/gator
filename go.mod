@@ -4,6 +4,7 @@ go 1.21
 
 require (
 	github.com/Masterminds/sprig/v3 v3.2.3
+	github.com/containernetworking/cni v1.1.2
 	github.com/evanphx/json-patch v0.5.2
 )
 
@@ -19,5 +20,4 @@ require (
 	github.com/shopspring/decimal v1.2.0 // indirect
 	github.com/spf13/cast v1.3.1 // indirect
 	golang.org/x/crypto v0.3.0 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
