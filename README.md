@@ -93,7 +93,7 @@ Put it all together and you get the following `gator` configuration:
 {
   "type": "gator",
   "plugin": "route-override",
-  "patch": "{\"addroutes\": [{\"dst\": \"10.96.0.0/16\", \"gw\": \"{{with $n := index .prevResult.ips 0}}{{$n.gateway}}{{end}}\"}]}",
+  "patch": "{\"addroutes\": [{\"dst\": \"10.96.0.0/16\", \"gw\": \"{{with $n := index .prevResult.ips 0}}{{$n.gateway}}{{end}}\"}]}"
 }
 ```
 
