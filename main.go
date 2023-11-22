@@ -23,17 +23,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	sprig "github.com/Masterminds/sprig/v3"
+	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
+	"github.com/containernetworking/cni/pkg/version"
 	jsonpatch "github.com/evanphx/json-patch"
 )
+
+const PluginVersion = "v0.0.1"
 
 const (
 	ErrInvalidPatchTemplate = 100
@@ -60,28 +62,20 @@ type PluginConfig struct {
 }
 
 func main() {
-	stdin, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		err := types.NewError(
-			types.ErrIOFailure,
-			"failed to read stdin",
-			err.Error(),
-		)
-		handleError(err)
-		return
-	}
+	buildstr := fmt.Sprintf("CNI gator plugin %s", PluginVersion)
+	skel.PluginMain(gator, gator, gator, version.All, buildstr)
+}
 
-	conf, err := prepare(stdin)
+func gator(args *skel.CmdArgs) error {
+	conf, err := prepare(args.StdinData)
 	if err != nil {
-		handleError(err)
+		return err
 	}
 
 	// For debugging:
 	//fmt.Println(string(conf.finalConfig))
 
-	if err := delegate(conf.Plugin, conf.finalConfig, os.Environ()); err != nil {
-		handleError(err)
-	}
+	return delegate(conf.Plugin, conf.finalConfig, os.Environ())
 }
 
 func prepare(stdin []byte) (*PluginConfig, error) {
@@ -163,10 +157,6 @@ func prepare(stdin []byte) (*PluginConfig, error) {
 
 	conf.finalConfig = finalConfig
 	return conf, nil
-}
-
-func handleError(err error) {
-	log.Println(err)
 }
 
 func delegate(plugin string, stdin []byte, env []string) error {
