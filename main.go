@@ -54,10 +54,24 @@ type PluginConfig struct {
 	// Plugin is the name of the downstream CNI plugin which will be called.
 	Plugin string
 
+	// SkipAdd will bypass this plugin when CNI_COMMAND=ADD, making it a
+	// passthrough/no-op.
+	SkipAdd bool
+
+	// SkipDel will bypass this plugin when CNI_COMMAND=DEL, making it a
+	// passthrough/no-op.
+	SkipDel bool
+
+	// SkipCheck will bypass this plugin when CNI_COMMAND=CHECK, making it a
+	// passthrough/no-op.
+	SkipCheck bool
+
 	// finalConfig is the config that will be provided to stdin when the
 	// delegated plugin is called.
 	finalConfig []byte
 }
+
+var SkipConfig = &PluginConfig{}
 
 func main() {
 	stdin, err := io.ReadAll(os.Stdin)
@@ -79,6 +93,11 @@ func main() {
 	// For debugging:
 	//fmt.Println(string(conf.finalConfig))
 
+	if conf == SkipConfig {
+		fmt.Print(string(stdin))
+		os.Exit(0)
+	}
+
 	if err := delegate(conf.Plugin, conf.finalConfig, os.Environ()); err != nil {
 		handleError(err)
 	}
@@ -92,6 +111,21 @@ func prepare(stdin []byte) (*PluginConfig, error) {
 			"failed to parse JSON config",
 			err.Error(),
 		)
+	}
+
+	switch os.Getenv("CNI_COMMAND") {
+	case "ADD":
+		if conf.SkipAdd {
+			return SkipConfig, nil
+		}
+	case "DEL":
+		if conf.SkipDel {
+			return SkipConfig, nil
+		}
+	case "CHECK":
+		if conf.SkipCheck {
+			return SkipConfig, nil
+		}
 	}
 
 	tmpl, err := template.New("conf.Patch").Funcs(sprig.FuncMap()).Parse(conf.Patch)
