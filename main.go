@@ -24,10 +24,10 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	sprig "github.com/Masterminds/sprig/v3"
@@ -36,6 +36,7 @@ import (
 )
 
 const (
+	Version                 = "v0.0.1"
 	ErrInvalidPatchTemplate = 100
 	ErrMergeJSONFailed      = 101
 )
@@ -54,57 +55,65 @@ type PluginConfig struct {
 	// Plugin is the name of the downstream CNI plugin which will be called.
 	Plugin string
 
-	// SkipAdd will bypass this plugin when CNI_COMMAND=ADD, making it a
-	// passthrough/no-op.
-	SkipAdd bool
+	// Skip is an array of CNI_COMMAND values for which no action will be taken.
+	Skip []string
 
-	// SkipDel will bypass this plugin when CNI_COMMAND=DEL, making it a
-	// passthrough/no-op.
-	SkipDel bool
+	// stdin is the original stdin that gator received
+	stdin []byte
 
-	// SkipCheck will bypass this plugin when CNI_COMMAND=CHECK, making it a
-	// passthrough/no-op.
-	SkipCheck bool
-
-	// finalConfig is the config that will be provided to stdin when the
-	// delegated plugin is called.
-	finalConfig []byte
+	// downstreamConfig is what will be sent as stdin to the delegated plugin.
+	downstreamConfig []byte
 }
 
-var SkipConfig = &PluginConfig{}
-
 func main() {
-	stdin, err := io.ReadAll(os.Stdin)
-	if err != nil {
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		fmt.Printf("CNI gator plugin %s\n", Version)
+		os.Exit(0)
+	}
+
+	stdin, ioerr := io.ReadAll(os.Stdin)
+	if ioerr != nil {
 		err := types.NewError(
 			types.ErrIOFailure,
 			"failed to read stdin",
-			err.Error(),
+			ioerr.Error(),
 		)
 		handleError(err)
 		return
 	}
 
-	conf, err := prepare(stdin)
+	conf, err := parseConf(stdin)
+
 	if err != nil {
 		handleError(err)
 	}
 
 	// For debugging:
-	//fmt.Println(string(conf.finalConfig))
+	//fmt.Println(string(conf.downstreamConfig))
 
-	if conf == SkipConfig {
-		fmt.Print(string(stdin))
-		os.Exit(0)
-	}
-
-	if err := delegate(conf.Plugin, conf.finalConfig, os.Environ()); err != nil {
+	pluginPath, err := getPluginPath(conf.Plugin)
+	if err != nil {
 		handleError(err)
 	}
+
+	stdout, stderr, exitcode := delegate(pluginPath, conf.downstreamConfig, os.Environ())
+
+	fmt.Print(string(stdout))
+	fmt.Fprint(os.Stderr, string(stderr))
+	os.Exit(exitcode)
 }
 
-func prepare(stdin []byte) (*PluginConfig, error) {
-	conf := &PluginConfig{}
+func handleError(err *types.Error) {
+	fmt.Fprint(os.Stderr, err.Error())
+	os.Exit(int(err.Code))
+}
+
+// parseConf will return a complete [PluginConfig] based on stdin. If the
+// [PluginConfig.Skip] contains the CNI_COMMAND, it will immediately print what
+// it received on stdin and exit. If an error is encountered, it is returned as
+// a [types.Error].
+func parseConf(stdin []byte) (conf *PluginConfig, err *types.Error) {
+	conf = &PluginConfig{stdin: stdin}
 	if err := json.Unmarshal(stdin, conf); err != nil {
 		return nil, types.NewError(
 			types.ErrDecodingFailure,
@@ -113,21 +122,22 @@ func prepare(stdin []byte) (*PluginConfig, error) {
 		)
 	}
 
-	switch os.Getenv("CNI_COMMAND") {
-	case "ADD":
-		if conf.SkipAdd {
-			return SkipConfig, nil
-		}
-	case "DEL":
-		if conf.SkipDel {
-			return SkipConfig, nil
-		}
-	case "CHECK":
-		if conf.SkipCheck {
-			return SkipConfig, nil
-		}
+	if slices.Contains(conf.Skip, os.Getenv("CNI_COMMAND")) {
+		fmt.Print(string(stdin))
+		os.Exit(0)
 	}
 
+	downstreamConfig, err := generateDownstream(conf)
+	if err != nil {
+		return conf, err
+	}
+
+	conf.downstreamConfig = downstreamConfig
+	return conf, nil
+}
+
+func generateDownstream(conf *PluginConfig) ([]byte, *types.Error) {
+	stdin := conf.stdin
 	tmpl, err := template.New("conf.Patch").Funcs(sprig.FuncMap()).Parse(conf.Patch)
 	if err != nil {
 		return nil, types.NewError(
@@ -195,31 +205,29 @@ func prepare(stdin []byte) (*PluginConfig, error) {
 		)
 	}
 
-	conf.finalConfig = finalConfig
-	return conf, nil
+	return finalConfig, nil
 }
 
-func handleError(err error) {
-	log.Println(err)
-}
+func delegate(pluginPath string, stdin []byte, env []string) (stdout []byte, stderr []byte, exitcode int) {
+	fout := &bytes.Buffer{}
+	ferr := &bytes.Buffer{}
 
-func delegate(plugin string, stdin []byte, env []string) error {
-	pluginPath, err := getPluginPath(plugin)
-	if err != nil {
-		return err
-	}
 	cmd := exec.Command(pluginPath)
 	cmd.Env = env
-	cmd.Stderr = os.Stderr
 	cmd.Stdin = bytes.NewReader(stdin)
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = fout
+	cmd.Stderr = ferr
+
 	if err := cmd.Run(); err != nil {
-		return err
+		if exiterr, ok := err.(*exec.ExitError); ok {
+			exitcode = exiterr.ExitCode()
+		}
 	}
-	return nil
+
+	return fout.Bytes(), ferr.Bytes(), exitcode
 }
 
-func getPluginPath(plugin string) (string, error) {
+func getPluginPath(plugin string) (string, *types.Error) {
 	cniPaths := []string{}
 	if cniPathVar := os.Getenv("CNI_PATH"); cniPathVar != "" {
 		cniPaths = append(cniPaths, strings.Split(cniPathVar, ":")...)
@@ -242,5 +250,9 @@ func getPluginPath(plugin string) (string, error) {
 			return fullPath, nil
 		}
 	}
-	return "", fmt.Errorf("error: cni executable not found in CNI_PATH: %s", plugin)
+	return "", types.NewError(
+		ErrMergeJSONFailed,
+		fmt.Sprintf("cni executable not found in CNI_PATH: %s", plugin),
+		fmt.Sprintf("checked: %v", cniPaths),
+	)
 }

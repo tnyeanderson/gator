@@ -9,61 +9,10 @@ import (
 	jsonpatch "github.com/evanphx/json-patch"
 )
 
-func ExampleSkipCheck() {
-	os.Setenv("CNI_COMMAND", "CHECK")
-	stdin := []byte(`{"type": "gator", "plugin": "debug", "skipCheck": true, "prevResult": {"key": "value"}}`)
-	conf, _ := prepare(stdin)
-	if conf == SkipConfig {
-		fmt.Println("shouldskip")
-	}
-	noskipstdin := []byte(`{"type": "gator", "plugin": "debug", "prevResult": {"key": "value"}}`)
-	noskipconf, _ := prepare(noskipstdin)
-	if noskipconf == SkipConfig {
-		fmt.Println("shouldnotskip")
-	}
-
-	// Output:
-	// shouldskip
-}
-
-func ExampleSkipDel() {
-	os.Setenv("CNI_COMMAND", "DEL")
-	stdin := []byte(`{"type": "gator", "plugin": "debug", "skipDel": true, "prevResult": {"key": "value"}}`)
-	conf, _ := prepare(stdin)
-	if conf == SkipConfig {
-		fmt.Println("shouldskip")
-	}
-	noskipstdin := []byte(`{"type": "gator", "plugin": "debug", "prevResult": {"key": "value"}}`)
-	noskipconf, _ := prepare(noskipstdin)
-	if noskipconf == SkipConfig {
-		fmt.Println("shouldnotskip")
-	}
-
-	// Output:
-	// shouldskip
-}
-
-func ExampleSkipAdd() {
-	os.Setenv("CNI_COMMAND", "ADD")
-	stdin := []byte(`{"type": "gator", "plugin": "debug", "skipAdd": true, "prevResult": {"key": "value"}}`)
-	conf, _ := prepare(stdin)
-	if conf == SkipConfig {
-		fmt.Println("shouldskip")
-	}
-	noskipstdin := []byte(`{"type": "gator", "plugin": "debug", "prevResult": {"key": "value"}}`)
-	noskipconf, _ := prepare(noskipstdin)
-	if noskipconf == SkipConfig {
-		fmt.Println("shouldnotskip")
-	}
-
-	// Output:
-	// shouldskip
-}
-
 func ExamplePluginNoOp() {
 	stdin := []byte(`{"type": "gator", "plugin": "debug", "prevResult": {"key": "value"}}`)
-	c, _ := prepare(stdin)
-	out, _ := formatTestJSON(c.finalConfig)
+	conf, _ := parseConf(stdin)
+	out, _ := formatTestJSON(conf.downstreamConfig)
 	fmt.Println(string(out))
 
 	// Output:
@@ -77,8 +26,8 @@ func ExamplePluginNoOp() {
 
 func ExamplePluginRouteOverride() {
 	stdin, _ := mergePrevResult("testdata/route-override.json")
-	c, _ := prepare(stdin)
-	out, _ := formatTestJSON(c.finalConfig)
+	conf, _ := parseConf(stdin)
+	out, _ := formatTestJSON(conf.downstreamConfig)
 	fmt.Println(string(out))
 
 	// Output:
@@ -134,8 +83,8 @@ func ExamplePluginDebug() {
 	// This debug.json file's patch is time-based. This test will have to be
 	// updated each year.
 	stdin, _ := mergePrevResult("testdata/debug.json")
-	c, _ := prepare(stdin)
-	out, _ := formatTestJSON(c.finalConfig)
+	conf, _ := parseConf(stdin)
+	out, _ := formatTestJSON(conf.downstreamConfig)
 	fmt.Println(string(out))
 
 	// Output:
