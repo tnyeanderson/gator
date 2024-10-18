@@ -11,7 +11,7 @@ on the full input from stdin before the patch is applied to the downstream
 configuration.
 
 Once the patch has been applied to the downstream configuration, it will be
-merged with stdin (gator's plugin configuration will be removed) and the the
+merged with stdin (gator's plugin configuration will be removed) and the
 downstream plugin will be called with the same environment and the new,
 templated, patched stdin... just as if it had been called originally, but now
 you can dynamically configure plugins based on previous results!
@@ -36,7 +36,7 @@ import (
 )
 
 const (
-	Version                 = "v0.0.1"
+	Version                 = "v0.0.2"
 	ErrInvalidPatchTemplate = 100
 	ErrMergeJSONFailed      = 101
 )
@@ -83,7 +83,6 @@ func main() {
 	}
 
 	conf, err := parseConf(stdin)
-
 	if err != nil {
 		handleError(err)
 	}
@@ -228,11 +227,9 @@ func delegate(pluginPath string, stdin []byte, env []string) (stdout []byte, std
 }
 
 func getPluginPath(plugin string) (string, *types.Error) {
-	cniPaths := []string{}
+	cniPaths := []string{"/opt/cni/bin"}
 	if cniPathVar := os.Getenv("CNI_PATH"); cniPathVar != "" {
-		cniPaths = append(cniPaths, strings.Split(cniPathVar, ":")...)
-	} else {
-		cniPaths = []string{"/opt/cni/bin"}
+		cniPaths = strings.Split(cniPathVar, ":")
 	}
 
 	for _, p := range cniPaths {

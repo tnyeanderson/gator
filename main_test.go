@@ -96,7 +96,7 @@ func ExamplePluginDebug() {
 	//       "ip link set $CNI_IFNAME promisc on"
 	//     ]
 	//   ],
-	//   "cniOutput": "/tmp/cni-output-2023.log",
+	//   "cniOutput": "/tmp/cni-output-2024.log",
 	//   "prevResult": {
 	//     "cniVersion": "0.3.1",
 	//     "dns": {},
