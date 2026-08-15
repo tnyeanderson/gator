@@ -28,19 +28,25 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	sprig "github.com/Masterminds/sprig/v3"
 	"github.com/containernetworking/cni/pkg/types"
 	jsonpatch "github.com/evanphx/json-patch"
 )
 
-const (
-	Version                 = "v0.0.2"
-	ErrInvalidPatchTemplate = 100
-	ErrMergeJSONFailed      = 101
+var (
+	version = "dev"
+	commit  = "HEAD"
 )
 
+const (
+	ErrInvalidPatchTemplate = 100
+	ErrMergeJSONFailed      = 101
+	ErrDownstreamExecFailed = 102
+)
+
+// PluginConfig is the configuration for the gator plugin itself, provided via
+// stdin.
 type PluginConfig struct {
 	// Config is the configuration for the downstream CNI plugin.
 	Config *json.RawMessage
@@ -57,86 +63,77 @@ type PluginConfig struct {
 
 	// Skip is an array of CNI_COMMAND values for which no action will be taken.
 	Skip []string
-
-	// stdin is the original stdin that gator received
-	stdin []byte
-
-	// downstreamConfig is what will be sent as stdin to the delegated plugin.
-	downstreamConfig []byte
 }
 
 func main() {
+	// Handle --version flag
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Printf("CNI gator plugin %s\n", Version)
+		fmt.Printf("CNI gator plugin version %s commit %s\n", version, commit)
 		os.Exit(0)
 	}
 
+	// Since jsonpatch requires []byte, we can't just pass io.Reader arguments
+	// around. Therefore we are forced to buffer the input.
 	stdin, ioerr := io.ReadAll(os.Stdin)
 	if ioerr != nil {
-		err := types.NewError(
-			types.ErrIOFailure,
-			"failed to read stdin",
-			ioerr.Error(),
-		)
-		handleError(err)
+		exit(types.NewError(types.ErrIOFailure, "failed to read stdin", ioerr.Error()))
 		return
 	}
 
-	conf, err := parseConf(stdin)
-	if err != nil {
-		handleError(err)
-	}
-
-	// For debugging:
-	//fmt.Println(string(conf.downstreamConfig))
-
-	pluginPath, err := getPluginPath(conf.Plugin)
-	if err != nil {
-		handleError(err)
-	}
-
-	stdout, stderr, exitcode := delegate(pluginPath, conf.downstreamConfig, os.Environ())
-
-	fmt.Print(string(stdout))
-	fmt.Fprint(os.Stderr, string(stderr))
-	os.Exit(exitcode)
-}
-
-func handleError(err *types.Error) {
-	fmt.Fprint(os.Stderr, err.Error())
-	os.Exit(int(err.Code))
-}
-
-// parseConf will return a complete [PluginConfig] based on stdin. If the
-// [PluginConfig.Skip] contains the CNI_COMMAND, it will immediately print what
-// it received on stdin and exit. If an error is encountered, it is returned as
-// a [types.Error].
-func parseConf(stdin []byte) (conf *PluginConfig, err *types.Error) {
-	conf = &PluginConfig{stdin: stdin}
+	// Unmarshal config
+	conf := &PluginConfig{}
 	if err := json.Unmarshal(stdin, conf); err != nil {
-		return nil, types.NewError(
-			types.ErrDecodingFailure,
-			"failed to parse JSON config",
-			err.Error(),
-		)
+		exit(types.NewError(types.ErrDecodingFailure, "failed to parse JSON config", err.Error()))
+		return
 	}
 
+	// Skip delegation for defined CNI_COMMAND values
 	if slices.Contains(conf.Skip, os.Getenv("CNI_COMMAND")) {
 		fmt.Print(string(stdin))
 		os.Exit(0)
 	}
 
-	downstreamConfig, err := generateDownstream(conf)
+	// Get path of delegate plugin
+	pluginPath, err := getPluginPath(conf.Plugin)
 	if err != nil {
-		return conf, err
+		exit(err)
+		return
 	}
 
-	conf.downstreamConfig = downstreamConfig
-	return conf, nil
+	// Generate downstream config
+	downstreamConfig, err := generateDownstream(stdin, conf)
+	if err != nil {
+		exit(err)
+		return
+	}
+
+	// Run the delegated plugin
+	cmd := exec.Command(pluginPath)
+	cmd.Env = os.Environ()
+	cmd.Stdin = bytes.NewReader(downstreamConfig)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		if exiterr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exiterr.ExitCode())
+		}
+		msg := fmt.Sprintf("exec error when calling downstream plugin: %s", pluginPath)
+		exit(types.NewError(ErrDownstreamExecFailed, msg, err.Error()))
+	}
 }
 
-func generateDownstream(conf *PluginConfig) ([]byte, *types.Error) {
-	stdin := conf.stdin
+// exit prints the CNI error to stderr and exits.
+func exit(err *types.Error) {
+	fmt.Fprint(os.Stderr, err.Error())
+	os.Exit(int(err.Code))
+}
+
+// generateDownstream templates the patch using the data from stdin, executes
+// the patch on the downstream config, removes gator's configuration items, and
+// returns the resulting downstream config for delegation.
+func generateDownstream(stdin []byte, conf *PluginConfig) ([]byte, *types.Error) {
+	// Parse the patch as a template
 	tmpl, err := template.New("conf.Patch").Funcs(sprig.FuncMap()).Parse(conf.Patch)
 	if err != nil {
 		return nil, types.NewError(
@@ -146,8 +143,8 @@ func generateDownstream(conf *PluginConfig) ([]byte, *types.Error) {
 		)
 	}
 
-	type data interface{}
-	var rawConf data
+	// Gather all data from stdin for use in template
+	var rawConf any
 	err = json.Unmarshal(stdin, &rawConf)
 	if err != nil {
 		return nil, types.NewError(
@@ -157,6 +154,7 @@ func generateDownstream(conf *PluginConfig) ([]byte, *types.Error) {
 		)
 	}
 
+	// Execute the template on the patch based on data from stdin
 	merger := &bytes.Buffer{}
 	if err = tmpl.Execute(merger, rawConf); err != nil {
 		return nil, types.NewError(
@@ -166,6 +164,7 @@ func generateDownstream(conf *PluginConfig) ([]byte, *types.Error) {
 		)
 	}
 
+	// Remove gator's own configuration
 	cleanup := fmt.Sprintf(`{"type": "%s", "plugin": null, "config": null, "patch": null}`, conf.Plugin)
 	cleaned, err := jsonpatch.MergePatch(stdin, []byte(cleanup))
 	if err != nil {
@@ -186,6 +185,7 @@ func generateDownstream(conf *PluginConfig) ([]byte, *types.Error) {
 		patch = []byte("{}")
 	}
 
+	// Execute the patch on the downstream config
 	downstream, err := jsonpatch.MergePatch(downstreamConf, patch)
 	if err != nil {
 		return nil, types.NewError(
@@ -195,6 +195,7 @@ func generateDownstream(conf *PluginConfig) ([]byte, *types.Error) {
 		)
 	}
 
+	// Merge the downstream config into the top-level config
 	finalConfig, err := jsonpatch.MergePatch(cleaned, downstream)
 	if err != nil {
 		return nil, types.NewError(
@@ -207,30 +208,9 @@ func generateDownstream(conf *PluginConfig) ([]byte, *types.Error) {
 	return finalConfig, nil
 }
 
-func delegate(pluginPath string, stdin []byte, env []string) (stdout []byte, stderr []byte, exitcode int) {
-	fout := &bytes.Buffer{}
-	ferr := &bytes.Buffer{}
-
-	cmd := exec.Command(pluginPath)
-	cmd.Env = env
-	cmd.Stdin = bytes.NewReader(stdin)
-	cmd.Stdout = fout
-	cmd.Stderr = ferr
-
-	if err := cmd.Run(); err != nil {
-		if exiterr, ok := err.(*exec.ExitError); ok {
-			exitcode = exiterr.ExitCode()
-		}
-	}
-
-	return fout.Bytes(), ferr.Bytes(), exitcode
-}
-
+// getPluginPath searches the CNI_PATH locations for the delegate plugin.
 func getPluginPath(plugin string) (string, *types.Error) {
-	cniPaths := []string{"/opt/cni/bin"}
-	if cniPathVar := os.Getenv("CNI_PATH"); cniPathVar != "" {
-		cniPaths = strings.Split(cniPathVar, ":")
-	}
+	cniPaths := filepath.SplitList(os.Getenv("CNI_PATH"))
 
 	for _, p := range cniPaths {
 		fullPath := filepath.Join(p, plugin)
@@ -247,6 +227,7 @@ func getPluginPath(plugin string) (string, *types.Error) {
 			return fullPath, nil
 		}
 	}
+
 	return "", types.NewError(
 		ErrMergeJSONFailed,
 		fmt.Sprintf("cni executable not found in CNI_PATH: %s", plugin),
