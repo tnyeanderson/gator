@@ -9,10 +9,12 @@ import (
 	jsonpatch "github.com/evanphx/json-patch"
 )
 
-func ExamplePluginNoOp() {
+func Example_generateDownstream_PluginNoOp() {
 	stdin := []byte(`{"type": "gator", "plugin": "debug", "prevResult": {"key": "value"}}`)
-	conf, _ := parseConf(stdin)
-	out, _ := formatTestJSON(conf.downstreamConfig)
+	conf := &PluginConfig{}
+	json.Unmarshal(stdin, conf)
+	downstream, _ := generateDownstream(stdin, conf)
+	out, _ := formatTestJSON(downstream)
 	fmt.Println(string(out))
 
 	// Output:
@@ -24,10 +26,12 @@ func ExamplePluginNoOp() {
 	// }
 }
 
-func ExamplePluginRouteOverride() {
+func Example_generateDownstream_PluginRouteOverride() {
 	stdin, _ := mergePrevResult("testdata/route-override.json")
-	conf, _ := parseConf(stdin)
-	out, _ := formatTestJSON(conf.downstreamConfig)
+	conf := &PluginConfig{}
+	json.Unmarshal(stdin, conf)
+	downstream, _ := generateDownstream(stdin, conf)
+	out, _ := formatTestJSON(downstream)
 	fmt.Println(string(out))
 
 	// Output:
@@ -79,12 +83,14 @@ func ExamplePluginRouteOverride() {
 
 }
 
-func ExamplePluginDebug() {
+func Example_generateDownstream_PluginDebug() {
 	// This debug.json file's patch is time-based. This test will have to be
 	// updated each year.
 	stdin, _ := mergePrevResult("testdata/debug.json")
-	conf, _ := parseConf(stdin)
-	out, _ := formatTestJSON(conf.downstreamConfig)
+	conf := &PluginConfig{}
+	json.Unmarshal(stdin, conf)
+	downstream, _ := generateDownstream(stdin, conf)
+	out, _ := formatTestJSON(downstream)
 	fmt.Println(string(out))
 
 	// Output:
@@ -96,7 +102,7 @@ func ExamplePluginDebug() {
 	//       "ip link set $CNI_IFNAME promisc on"
 	//     ]
 	//   ],
-	//   "cniOutput": "/tmp/cni-output-2024.log",
+	//   "cniOutput": "/tmp/cni-output-2026.log",
 	//   "prevResult": {
 	//     "cniVersion": "0.3.1",
 	//     "dns": {},
